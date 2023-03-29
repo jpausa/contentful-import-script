@@ -4,18 +4,29 @@ import { Logger } from "tslog";
 
 const logger = new Logger({ name: "Contentful Data Import Script Logger" });
 
-interface IImportDataToContentful {
-  url: string;
-  headers?: Record<string, any>;
-  localeId: string;
-  contentTypes: {
-    assetLabels: IAssetLabels;
-    [key: string]: any;
+//Main interface for the whole import process. Used in importDataToContentfulFlow function
+interface IImportDataToContentfulFlow {
+  externalUrl: string;
+  contentfulConnectionCredentials: IContentfulConnection;
+  contentfulLocaleId: string;
+  contentTypesToMatch: {
+    assetsKeysToMatch: IAssetLabels;
+    [contentfulContentTypeKey: string]: any;
   };
-  contentTypeId: string;
+  contentfulContentTypeId: string;
 }
 
-interface IBuildContentfulEntries {
+//Used in BuildContentfulEntriesPromises function.
+interface IBuildContentfulEntriesPromises {
+  contentfulNewEntriesObject: Record<string, any>[];
+  contentTypes: Record<string, any>;
+  contentTypeId: string;
+  localeCode: string;
+  contentfulClient: contentful.Environment;
+}
+
+//Used in importEntriesToContentful function.
+interface IImportEntriesToContentful {
   externalData: any[];
   contentTypes: Record<string, any>;
   contentTypeId: string;
@@ -23,66 +34,47 @@ interface IBuildContentfulEntries {
   contentfulClient: contentful.Environment;
 }
 
-interface IEntriesImport {
-  externalData: any[];
-  contentTypes: Record<string, any>;
-  contentTypeId: string;
-  localeCode: string;
-  contentfulClient: contentful.Environment;
-}
-
+//Used in IImportDataToContentfulFlow interface.
 interface IAssetLabels {
   ["title"]: string;
   ["upload"]: string;
   ["contentType"]: string;
 }
 
-const contentfulStablishConnection =
-  async (): Promise<contentful.Environment> => {
-    logger.info("Connecting to Contentful");
-    const client = contentful.createClient({
-      accessToken: "CFPAT-uIIM9Oe2crOcpdYqNNV3TttpKpO9kij3Ws0whl6UHyE",
-    });
+//Used in contentfulStablishConnection function and IImportDataToContentfulFlow interface
+interface IContentfulConnection {
+  headers: Record<string, any>;
+  accesToken: string;
+  contentfulSpace: string;
+  contentfulEnvironment?: string;
+}
 
-    logger.info("Getting Contentful space");
-    const contentfulSpace = await client.getSpace("0u8ebu7x4bew");
-
-    logger.info("Getting Contentful environment");
-    const contentfulEnvironment = await contentfulSpace.getEnvironment(
-      "master"
-    );
-
-    return contentfulEnvironment;
-  };
-
-const matchDataContentTypes = (
-  content: Record<string, any>[],
-  contentTypes: Record<string, any>
-): Record<string, any>[] => {
-  logger.info(
-    "Matching external data content types to Contentful content types"
-  );
-  const entriesObject: Record<string, any>[] = [];
-  content.slice(0, 10).forEach((item) => {
-    const rawEntry: Record<string, any> = {};
-    for (const key in contentTypes) {
-     if (key !== "assetLabels") rawEntry[contentTypes[key]] = item[key];
-    }
-
-    entriesObject.push(rawEntry);
+/*
+It creates and returns the Contentful connection object.
+*/
+const contentfulStablishConnection = async (
+  contentfulConnectionCredentials: IContentfulConnection
+): Promise<contentful.Environment> => {
+  logger.info("Connecting to Contentful");
+  const contentfulClient = contentful.createClient({
+    accessToken: contentfulConnectionCredentials.accesToken,
   });
 
-  return entriesObject;
+  logger.info("Getting Contentful space");
+  const contentfulSpace = await contentfulClient.getSpace(
+    contentfulConnectionCredentials.contentfulSpace
+  );
+
+  logger.info("Getting Contentful environment");
+  return await contentfulSpace.getEnvironment(
+    contentfulConnectionCredentials.contentfulEnvironment ?? "master"
+  );
 };
 
-const pullExternalContent = async (
-  url: string,
-  headers?: Record<string, any>
-) => {
-  logger.info("Getting external data");
-  return (await axios.get(url, { headers })).data;
-};
-
+/*
+It validates the Contentful content type id and locale id exists in the Contentful environment. 
+It also retrieves and returns the locale code from Contentful if locale id exists.
+*/
 const validateAndRetrieveResources = async (
   contentTypeId: string,
   localeId: string,
@@ -103,115 +95,167 @@ const validateAndRetrieveResources = async (
   return localeCode;
 };
 
-const processDataRequests = async (
-  dataToImportPromises: Promise<any>[]
-): Promise<PromiseSettledResult<any>[]> => {
-  logger.info("Importing new contentful data");
-
-  return await Promise.allSettled(dataToImportPromises);
+/*
+It gets and returns the external data either if it comes from an endpoint or from a file
+*/
+const pullExternalContent = async (
+  url: string,
+  headers?: Record<string, any>
+) => {
+  logger.info("Getting external data");
+  return (await axios.get(url, { headers })).data;
 };
 
-const buildContentfulEntriesPromises = async ({
-  externalData,
+/*
+It stablishes a match between the Contentful content types and the external content types.
+It returns the resultant object that contains the Contentful content types as key and the corresponding 
+external data as value.
+*/
+const matchDataContentTypes = (
+  content: Record<string, any>[],
+  contentTypes: Record<string, any>
+): Record<string, any>[] => {
+  logger.info(
+    "Matching external data content types to Contentful content types"
+  );
+  const entriesObject: Record<string, any>[] = [];
+  content.slice(0, 10).forEach((item) => {
+    const rawEntry: Record<string, any> = {};
+    for (const key in contentTypes) {
+      if (key !== "assetsKeysToMatch") {
+        rawEntry[key] = {
+          value: item[contentTypes[key]["externalKey"]],
+          type: contentTypes[key].type,
+        };
+      }
+    }
+    entriesObject.push(rawEntry);
+  });
+
+  return entriesObject;
+};
+
+/*
+It makes every 'create Contentful entry' request, 'create Contentful asset' request and 'update 
+Contentful entry' request with the relationship between an asset and an entry.
+It also make the 'publish' request for every resource.
+Finally it returns the array of Promises
+*/
+const buildContentfulEntriesPromises = ({
+  contentfulNewEntriesObject,
   contentTypes,
   contentTypeId,
   localeCode,
   contentfulClient,
-}: IBuildContentfulEntries) => {
-  const contentfulNewEntriesObject = matchDataContentTypes(
-    externalData,
-    contentTypes
-  );
-    
+}: IBuildContentfulEntriesPromises) => {
   logger.info("Building Contentful new entries object to be imported");
   const createEntriesPromises: Promise<any>[] = [];
+
   contentfulNewEntriesObject.forEach((rawEntry) => {
     let fields: Record<string, any> = {};
 
     for (const key in rawEntry) {
-      if (key !== "image")
+      if (key !== contentTypes.assetsKeysToMatch?.contentType) {
+        const entryValue = rawEntry[key].value.toString();
         fields[key] = {
-          [localeCode]: rawEntry[key].toString(),
+          [localeCode]:
+            rawEntry[key].type !== "RichText"
+              ? entryValue
+              : {
+                  content: [
+                    {
+                      nodeType: "paragraph",
+                      data: {},
+                      content: [
+                        {
+                          value: entryValue,
+                          nodeType: "text",
+                          marks: [],
+                          data: {},
+                        },
+                      ],
+                    },
+                  ],
+                  data: {},
+                  nodeType: "document",
+                },
         };
+      }
     }
-    
-    
-    
-    createEntriesPromises.push(
-      contentfulClient
-        .createEntry(contentTypeId, { fields })
-        .then((entry) => {
-          
-          const imageUrl = rawEntry[contentTypes.assetLabels.upload];
-          const fileName = `${entry.sys.id}.jpg`;
-          
-          let newAssetObject = {
-            title: {
-              [localeCode]: fileName,
-            },
-            file: {
-              [localeCode]: {
-                contentType: contentTypes.assetLabels.contentType,
-                fileName,
-                upload: imageUrl,
-              },
-            },
-          };
-          contentfulClient
-            .createAsset({ fields: { ...newAssetObject } })
-            .then((asset) => asset.processForAllLocales()).then(asset=> asset.publish())
-            .then((asset) => {
 
-              entry.fields[contentTypes.assetLabels.contentType] = {
-                [localeCode]: entry.fields[contentTypes.assetLabels.contentType]?.localeCode
-                  ? [
-                      ...entry.fields[contentTypes.image][localeCode],
-                      {
-                        sys: {
-                          type: "Link",
-                          linkType: "Asset",
-                          id: asset.sys.id.toString(),
-                        },
+    createEntriesPromises.push(
+      contentfulClient.createEntry(contentTypeId, { fields }).then((entry) => {
+        const fileName = `${entry.sys.id}.jpg`;
+
+        let newAssetObject = {
+          title: {
+            [localeCode]: fileName,
+          },
+          file: {
+            [localeCode]: {
+              contentType: contentTypes.assetsKeysToMatch.contentType,
+              fileName,
+              upload: rawEntry[contentTypes.assetsKeysToMatch.upload]["value"],
+            },
+          },
+        };
+        contentfulClient
+          .createAsset({ fields: { ...newAssetObject } })
+          .then((asset) => asset.processForAllLocales())
+          .then((asset) => asset.publish())
+          .then((asset) => {
+            entry.fields[contentTypes.assetsKeysToMatch.contentType] = {
+              [localeCode]: entry.fields[
+                contentTypes.assetsKeysToMatch.contentType
+              ]?.localeCode
+                ? [
+                    ...entry.fields[contentTypes.image][localeCode],
+                    {
+                      sys: {
+                        type: "Link",
+                        linkType: "Asset",
+                        id: asset.sys.id.toString(),
                       },
-                    ]
-                  : [
-                      {
-                        sys: {
-                          type: "Link",
-                          linkType: "Asset",
-                          id: asset.sys.id.toString(),
-                        },
+                    },
+                  ]
+                : [
+                    {
+                      sys: {
+                        type: "Link",
+                        linkType: "Asset",
+                        id: asset.sys.id.toString(),
                       },
-                    ],
-              };
-              entry.update().then(entry => entry.publish());
-            });
-        })
+                    },
+                  ],
+            };
+            entry.update().then((entry) => entry.publish());
+          });
+      })
     );
   });
 
   return createEntriesPromises;
 };
 
-const importEntriesToContentful = async ({
-  externalData,
-  localeCode,
-  contentTypes,
-  contentTypeId,
-  contentfulClient,
-}: IEntriesImport) => {
-  const createEntriesBulkPromises = await buildContentfulEntriesPromises({
-    externalData,
-    contentTypes,
-    contentTypeId,
-    localeCode,
-    contentfulClient,
-  });
+/* 
+It receives and array of Promises to be resolved using Promise.allSettled() function
+Finally it returns an array of elements that represent the result of every resolved promise
+*/
+const processPromisesRequests = async (
+  dataToImportPromises: Promise<any>[]
+): Promise<PromiseSettledResult<any>[]> => {
+  logger.info("Importing data");
 
-  const entriesImportingResults = await processDataRequests(
-    createEntriesBulkPromises
-  );
+  return await Promise.allSettled(dataToImportPromises);
+};
 
+/*
+It gathers information about the importing process and shows it 
+in the logs
+*/
+const generateImportingResults = async (
+  entriesImportingResults: PromiseSettledResult<any>[]
+) => {
   let rejectedEntriesImports: any[] = [];
   entriesImportingResults.forEach((entry) => {
     if (entry.status === "rejected") {
@@ -238,15 +282,20 @@ const importEntriesToContentful = async ({
   );
 };
 
+/*
+Main function that triggers the import data flow
+*/
 const importDataToContentfulFlow = async ({
-  url,
-  contentTypes,
-  contentTypeId,
-  localeId,
-  headers,
-}: IImportDataToContentful): Promise<void> => {
+  externalUrl: url,
+  contentTypesToMatch: contentTypes,
+  contentfulContentTypeId: contentTypeId,
+  contentfulLocaleId: localeId,
+  contentfulConnectionCredentials,
+}: IImportDataToContentfulFlow): Promise<void> => {
   try {
-    const contentfulClient = await contentfulStablishConnection();
+    const contentfulClient = await contentfulStablishConnection(
+      contentfulConnectionCredentials
+    );
 
     const localeCode = await validateAndRetrieveResources(
       contentTypeId,
@@ -254,24 +303,31 @@ const importDataToContentfulFlow = async ({
       contentfulClient
     );
 
-    const externalData: [] = (await pullExternalContent(url, headers)).data;
+    const externalData: [] = (
+      await pullExternalContent(url, contentfulConnectionCredentials?.headers)
+    ).data;
 
-    await importEntriesToContentful({
+    const contentfulNewEntriesObject = matchDataContentTypes(
       externalData,
-      localeCode,
+      contentTypes
+    );
+
+    const createEntriesPromises = buildContentfulEntriesPromises({
+      contentfulNewEntriesObject,
       contentTypes,
       contentTypeId,
+      localeCode,
       contentfulClient,
     });
 
-    // await importAssetsToContentful({
-    //     externalData,
-    //     contentTypes.assetLabels,
-    //     localeCode,
-    //     contentfulClient,
-    //   })
+    const entriesImportingResults = await processPromisesRequests(
+      createEntriesPromises
+    );
+
+    generateImportingResults(entriesImportingResults);
   } catch (error: any) {
-    const parsedError = error.message ? JSON.parse(error?.message) : error;
+    const parsedError =
+      error.message && error.details ? JSON.parse(error?.message) : error;
     const parameters = {
       url,
       contentTypes,
@@ -294,21 +350,25 @@ const importDataToContentfulFlow = async ({
 };
 
 await importDataToContentfulFlow({
-  url: "https://dummyapi.io/data/v1/post",
-  headers: {
-    "app-id": "6423116cd3cbd49cd60cc1bf",
+  externalUrl: "https://dummyapi.io/data/v1/post",
+  contentfulConnectionCredentials: {
+    headers: {
+      "app-id": "6423116cd3cbd49cd60cc1bf",
+    },
+    accesToken: "CFPAT-uIIM9Oe2crOcpdYqNNV3TttpKpO9kij3Ws0whl6UHyE",
+    contentfulSpace: "0u8ebu7x4bew",
   },
-  contentTypes: {
-    id: "title",
-    text: "postBody",
-    likes: "postAuthor",
-    image: "image",
-    assetLabels: {
+  contentTypesToMatch: {
+    title: { type: "Symbol", externalKey: "id" },
+    postBody: { type: "Symbol", externalKey: "text" },
+    postAuthor: { type: "Symbol", externalKey: "likes" },
+    image: { type: "image", externalKey: "image" },
+    assetsKeysToMatch: {
       title: "id",
       upload: "image",
       contentType: "image",
     },
   },
-  contentTypeId: "blogPost",
-  localeId: "5rybbKSGp3JC1AKfSziJ7z", //en-US is the default locale
+  contentfulContentTypeId: "blogPost",
+  contentfulLocaleId: "5rybbKSGp3JC1AKfSziJ7z", //en-US is the default locale
 });
