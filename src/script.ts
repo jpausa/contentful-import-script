@@ -378,8 +378,6 @@ const importDataToContentfulFlow = async ({
   }
 };
 
-console.log(process.env)
-
 await importDataToContentfulFlow({
   externalSource: {
     //url: process.env.EXTERNAL_SOURCE!,
