@@ -1,12 +1,19 @@
 import contentful from "contentful-management";
 import axios from "axios";
+import { readFileSync } from "fs";
+import * as path from "path";
 import { Logger } from "tslog";
+import * as dotenv from 'dotenv'
+dotenv.config()
 
 const logger = new Logger({ name: "Contentful Data Import Script Logger" });
 
 //Main interface for the whole import process. Used in importDataToContentfulFlow function
 interface IImportDataToContentfulFlow {
-  externalUrl: string;
+  externalSource: {
+    url?: string;
+    localFilePath?: string;
+  };
   contentfulConnectionCredentials: IContentfulConnection;
   contentfulLocaleId: string;
   contentTypesToMatch: {
@@ -43,7 +50,7 @@ interface IAssetLabels {
 
 //Used in contentfulStablishConnection function and IImportDataToContentfulFlow interface
 interface IContentfulConnection {
-  headers: Record<string, any>;
+  headers?: Record<string, any>;
   accesToken: string;
   contentfulSpace: string;
   contentfulEnvironment?: string;
@@ -96,14 +103,26 @@ const validateAndRetrieveResources = async (
 };
 
 /*
-It gets and returns the external data either if it comes from an endpoint or from a file
+It gets and returns the external data either if it comes from an endpoint
 */
-const pullExternalContent = async (
+const getExternalContentFromUrl = async (
   url: string,
   headers?: Record<string, any>
 ) => {
   logger.info("Getting external data");
   return (await axios.get(url, { headers })).data;
+};
+
+/*
+It gets and returns the external data either if it comes from an endpoint
+*/
+const getExternalContentFromFile = async (localFilePath: string) => {
+  const configDirectory = path.resolve(process.cwd(), "config");
+
+  logger.info("Getting external data");
+  const data = readFileSync(path.join(configDirectory, localFilePath), "utf8");
+
+  return JSON.parse(data);
 };
 
 /*
@@ -119,7 +138,7 @@ const matchDataContentTypes = (
     "Matching external data content types to Contentful content types"
   );
   const entriesObject: Record<string, any>[] = [];
-  content.slice(0, 10).forEach((item) => {
+  content.forEach((item) => {
     const rawEntry: Record<string, any> = {};
     for (const key in contentTypes) {
       if (key !== "assetsKeysToMatch") {
@@ -286,7 +305,7 @@ const generateImportingResults = async (
 Main function that triggers the import data flow
 */
 const importDataToContentfulFlow = async ({
-  externalUrl: url,
+  externalSource,
   contentTypesToMatch: contentTypes,
   contentfulContentTypeId: contentTypeId,
   contentfulLocaleId: localeId,
@@ -303,9 +322,19 @@ const importDataToContentfulFlow = async ({
       contentfulClient
     );
 
-    const externalData: [] = (
-      await pullExternalContent(url, contentfulConnectionCredentials?.headers)
-    ).data;
+    let externalData: [];
+    if (externalSource.url) {
+      externalData = (
+        await getExternalContentFromUrl(
+          externalSource.url!,
+          contentfulConnectionCredentials?.headers
+        )
+      ).data;
+    } else {
+      externalData = (await getExternalContentFromFile(
+        externalSource.localFilePath!
+      )).data;
+    }
 
     const contentfulNewEntriesObject = matchDataContentTypes(
       externalData,
@@ -329,7 +358,7 @@ const importDataToContentfulFlow = async ({
     const parsedError =
       error.message && error.details ? JSON.parse(error?.message) : error;
     const parameters = {
-      url,
+      externalSource,
       contentTypes,
       contentTypeId,
       localeId,
@@ -349,14 +378,17 @@ const importDataToContentfulFlow = async ({
   }
 };
 
+console.log(process.env)
+
 await importDataToContentfulFlow({
-  externalUrl: "https://dummyapi.io/data/v1/post",
+  externalSource: {
+    //url: process.env.EXTERNAL_SOURCE!,
+    localFilePath: process.env.EXTERNAL_SOURCE!,
+  },
   contentfulConnectionCredentials: {
-    headers: {
-      "app-id": "6423116cd3cbd49cd60cc1bf",
-    },
-    accesToken: "CFPAT-uIIM9Oe2crOcpdYqNNV3TttpKpO9kij3Ws0whl6UHyE",
-    contentfulSpace: "0u8ebu7x4bew",
+    accesToken: process.env.CONTENTFUL_ACCESS_TOKEN!,
+    contentfulSpace: process.env.CONTENTFUL_SPACE_ID!,
+    contentfulEnvironment: process.env.CONTENTFUL_ENVIRONMENT_ID!
   },
   contentTypesToMatch: {
     title: { type: "Symbol", externalKey: "id" },
@@ -369,6 +401,6 @@ await importDataToContentfulFlow({
       contentType: "image",
     },
   },
-  contentfulContentTypeId: "blogPost",
-  contentfulLocaleId: "5rybbKSGp3JC1AKfSziJ7z", //en-US is the default locale
+  contentfulContentTypeId: process.env.CONTENTFUL_CONTENT_TYPE_ID!,
+  contentfulLocaleId: process.env.CONTENTFUL_LOCALE_ID!, //en-US is the default locale
 });

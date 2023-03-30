@@ -1,8 +1,10 @@
 lockfileVersion: 5.4
 
 specifiers:
+  '@types/node': ^18.15.11
   axios: ^1.3.4
   contentful-management: ^10.30.1
+  dotenv: ^16.0.3
   tslog: ^4.8.2
   typescript: ^4.9.3
   vite: ^4.2.0
@@ -10,11 +12,13 @@ specifiers:
 dependencies:
   axios: 1.3.4
   contentful-management: 10.30.1
+  dotenv: 16.0.3
   tslog: 4.8.2
 
 devDependencies:
+  '@types/node': 18.15.11
   typescript: 4.9.5
-  vite: 4.2.1
+  vite: 4.2.1_@types+node@18.15.11
 
 packages:
 
@@ -220,6 +224,10 @@ packages:
     resolution: {integrity: sha512-MhCUjojzDhVLnZnxwPwa+rETFRDQ0ffjxYdrqOP6TBO2O0/Z64PV5tNeYApo4bc4y4frbWOrRwv/eEkXlI13Rw==}
     dev: false
 
+  /@types/node/18.15.11:
+    resolution: {integrity: sha512-E5Kwq2n4SbMzQOn6wnmBjuK9ouqlURrcZDVfbo9ftDDTFt3nk7ZKK4GMOzoYgnpQJKcxwQw+lGaBvvlMo0qN/Q==}
+    dev: true
+
   /asynckit/0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
     dev: false
@@ -285,6 +293,11 @@ packages:
   /delayed-stream/1.0.0:
     resolution: {integrity: sha512-ZySD7Nf91aLB0RxL4KGrKHBXl7Eds1DAmEdcoVawXnLD7SDhpNgtuII2aAkg7a7QS41jxPSZ17p4VdGnMHk3MQ==}
     engines: {node: '>=0.4.0'}
+    dev: false
+
+  /dotenv/16.0.3:
+    resolution: {integrity: sha512-7GO6HghkA5fYG9TYnNxi14/7K9f5occMlp3zXAuSxn7CKCxt9xbNWG7yF8hTCSUchlfWSe3uLmlPfigevRItzQ==}
+    engines: {node: '>=12'}
     dev: false
 
   /esbuild/0.17.12:
@@ -494,7 +507,7 @@ packages:
     hasBin: true
     dev: true
 
-  /vite/4.2.1:
+  /vite/4.2.1_@types+node@18.15.11:
     resolution: {integrity: sha512-7MKhqdy0ISo4wnvwtqZkjke6XN4taqQ2TBaTccLIpOKv7Vp2h4Y+NpmWCnGDeSvvn45KxvWgGyb0MkHvY1vgbg==}
     engines: {node: ^14.18.0 || >=16.0.0}
     hasBin: true
@@ -519,6 +532,7 @@ packages:
       terser:
         optional: true
     dependencies:
+      '@types/node': 18.15.11
       esbuild: 0.17.12
       postcss: 8.4.21
       resolve: 1.22.1
